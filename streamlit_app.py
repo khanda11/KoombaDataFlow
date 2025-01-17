@@ -42,6 +42,9 @@ def validate_and_clean(file):
         st.error(f"Error reading {file.name}: {e}")
         return None
 
+    # Log detected column names
+   
+
     # Check for missing columns
     missing_columns = [col for col in REQUIRED_COLUMNS if col not in df.columns]
     if missing_columns:
@@ -51,9 +54,10 @@ def validate_and_clean(file):
         st.success(f"File {file.name} passed validation!")
 
     # Handle missing data
+    
     df.dropna(subset=["Unique ID", "Completed"], inplace=True)  # Drop rows missing critical fields
 
-    # Standardize column names
+    # Standardize column names (strip spaces and remove non-breaking spaces)
     df.columns = df.columns.str.strip()
     df.columns = df.columns.str.replace("\xa0", "", regex=True)
 
@@ -72,10 +76,9 @@ def calculate_total_change(df, unique_id_col, time_col):
     Calculate the total change for numeric columns grouped by Unique ID.
     """
     df = df.sort_values(by=[unique_id_col, time_col])
-    df = preprocess_numeric_columns(df)
+    df = preprocess_numeric_columns(df)  # Ensure numeric columns are preprocessed
     numeric_columns = [
-        col for col in df.select_dtypes(include=["number"]).columns 
-        if col not in ["Unique ID", "Client Phone Number"]
+        col for col in df.select_dtypes(include=["number"]).columns if col not in ["Unique ID", "Client Phone Number"]
     ]
 
     results = []
@@ -83,7 +86,7 @@ def calculate_total_change(df, unique_id_col, time_col):
         earliest_row = group.iloc[0]
         latest_row = group.iloc[-1]
         time_delta = latest_row[time_col] - earliest_row[time_col]
-        time_delta_days = time_delta.days if isinstance(time_delta, pd.Timedelta) else 0
+        time_delta_days = time_delta.days if isinstance(time_delta, pd.Timedelta) else 0  # Ensure timedelta is handled
 
         result = {
             "Unique ID": unique_id,
@@ -92,6 +95,7 @@ def calculate_total_change(df, unique_id_col, time_col):
 
         for col in numeric_columns:
             try:
+                # Ensure values are numeric
                 start_value = pd.to_numeric(earliest_row[col], errors="coerce")
                 end_value = pd.to_numeric(latest_row[col], errors="coerce")
 
@@ -111,20 +115,20 @@ def generate_plotly_line_graph(df, unique_id_col, time_col, client_mapping):
     """
     Generate line graphs for numeric fields for each unique client.
     """
-    df = preprocess_numeric_columns(df)
+    df = preprocess_numeric_columns(df)  # Preprocess the data to include numeric values
     numeric_columns = [
-        col for col in df.select_dtypes(include=["number"]).columns 
-        if col not in ["Unique ID", "Client Phone Number"]
+        col for col in df.select_dtypes(include=["number"]).columns if col not in ["Unique ID", "Client Phone Number"]
     ]
 
     for unique_id, group in df.groupby(unique_id_col):
-        if len(group) <= 1:
+        if len(group) <= 1:  # Skip graph generation if one or fewer data points
             st.warning(f"Not enough data points to generate a graph for Client ID {unique_id}.")
             continue
 
-        client_name = client_mapping.get(unique_id, "Unknown Client")
+        client_name = client_mapping.get(unique_id, "Unknown Client")  # Use mapping to get the name
         st.subheader(f"Client: {client_name}")
 
+        # Generate line graph for each numeric column
         for col in numeric_columns:
             fig = px.line(
                 group.sort_values(time_col),
@@ -136,13 +140,14 @@ def generate_plotly_line_graph(df, unique_id_col, time_col, client_mapping):
             )
             st.plotly_chart(fig)
 
+        # Allow CSV download of this client's data with unique keys
         csv_data = group.to_csv(index=False).encode("utf-8")
         st.download_button(
             label=f"Download {client_name} Data",
             data=csv_data,
             file_name=f"{client_name}_data.csv",
             mime="text/csv",
-            key=f"{unique_id}-download"
+            key=f"{unique_id}-download"  # Ensure unique key for each button
         )
 
 def display_total_change_table(total_change_df, combined_data):
@@ -151,18 +156,19 @@ def display_total_change_table(total_change_df, combined_data):
     """
     st.header("Total Change Summary (Table Format)")
 
+    # Map Unique ID to Client Name
     client_mapping = combined_data.set_index("Unique ID")["Client"].to_dict()
     total_change_df["Client"] = total_change_df["Unique ID"].map(client_mapping)
 
+    # Drop columns where all values are "N/A"
     filtered_columns = [col for col in total_change_df.columns if not total_change_df[col].eq("N/A").all()]
     total_change_df = total_change_df[filtered_columns]
 
-    columns = ["Client", "Time Delta (days)"] + [
-        col for col in total_change_df.columns 
-        if col not in ["Client", "Time Delta (days)"]
-    ]
+    # Reorganize columns
+    columns = ["Client", "Time Delta (days)"] + [col for col in total_change_df.columns if col not in ["Client", "Time Delta (days)"]]
     total_change_df = total_change_df[columns]
 
+    # Display as a table
     st.dataframe(total_change_df, use_container_width=True)
 
 # Main App Logic
@@ -184,7 +190,7 @@ if uploaded_files:
         elif "Client's Provider" not in combined_data.columns:
             st.error("The dataset must include a 'Client's Provider' column.")
         else:
-            # Create client mapping before using it
+            # Create client mapping once and use it throughout
             client_mapping = combined_data.set_index("Unique ID")["Client"].to_dict()
 
             # Filter Section
@@ -211,7 +217,7 @@ if uploaded_files:
                 index=0
             )
 
-            # Client Filter using the created client_mapping
+            # Client Filter
             unique_ids = combined_data["Unique ID"].dropna().unique()
             client_names = [client_mapping.get(uid, "Unknown") for uid in unique_ids]
             client_name_to_id = {client_mapping.get(uid, "Unknown"): uid for uid in unique_ids}
@@ -224,14 +230,17 @@ if uploaded_files:
             # Apply Filters
             filtered_data = combined_data.copy()
 
+            # Apply date filter
             if date_range:
                 filtered_data = filtered_data[
                     filtered_data["Completed"].between(pd.to_datetime(date_range[0]), pd.to_datetime(date_range[1]))
                 ]
 
+            # Apply provider filter
             if selected_provider != "All":
                 filtered_data = filtered_data[filtered_data["Client's Provider"] == selected_provider]
 
+            # Apply client filter
             if selected_client != "All":
                 filtered_data = filtered_data[filtered_data["Unique ID"] == client_name_to_id[selected_client]]
 
@@ -239,8 +248,13 @@ if uploaded_files:
                 st.write("**Filtered Data:**")
                 st.dataframe(filtered_data)
 
+                # Calculate total change
                 total_change_df = calculate_total_change(filtered_data, "Unique ID", "Completed")
+
+                # Display total change data as a table
                 display_total_change_table(total_change_df, filtered_data)
+
+                # Generate line graphs for each unique client
                 generate_plotly_line_graph(filtered_data, "Unique ID", "Completed", client_mapping)
             else:
                 st.warning("No data available for the selected filters.")
