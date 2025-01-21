@@ -2,11 +2,11 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 from utils import data_processing
-from utils.reports import generate_summary_report, save_report
+from utils.reports import generate_summary_report, generate_time_trend_report, save_report
 
 # Set up the Streamlit app
 st.title("Koomba Data Analysis")
-st.write("Upload your CSV files to analyze client progress over time.")
+st.write("Upload your CSV files to analyze client progress.")
 
 # Upload CSV file(s)
 uploaded_files = st.file_uploader("Upload CSV files", type="csv", accept_multiple_files=True)
@@ -14,7 +14,14 @@ uploaded_files = st.file_uploader("Upload CSV files", type="csv", accept_multipl
 # Define required columns for validation
 REQUIRED_COLUMNS = ["Unique ID", "Completed", "Client", "Client's Provider", "Team"]
 
-# Initialize empty DataFrame for combined data to avoid NameError
+# Add analysis type selection
+analysis_type = st.radio(
+    "Select Analysis Type",
+    ["Time Trend Analysis", "Summary Statistics"],
+    help="Choose between analyzing trends over time or viewing summary statistics"
+)
+
+# Initialize empty DataFrame for combined data
 combined_data = pd.DataFrame(columns=REQUIRED_COLUMNS)
 
 if uploaded_files:
@@ -88,17 +95,26 @@ if not combined_data.empty:
     if filtered_data.empty:
         st.warning("No data available after applying filters. Adjust the filters and try again.")
     else:
-        st.subheader("Summary Report")
-        output_file = f"client_progress_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
-        report_html = generate_summary_report(filtered_data)
+        # Generate appropriate report based on analysis type
+        if analysis_type == "Time Trend Analysis":
+            st.subheader("Time Trend Analysis")
+            report_html = generate_time_trend_report(filtered_data)
+            output_file = f"time_trend_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
+        else:  # Summary Statistics
+            st.subheader("Summary Statistics")
+            report_html = generate_summary_report(filtered_data)
+            output_file = f"summary_statistics_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
+
+        # Display the report
         st.components.v1.html(report_html, height=800, scrolling=True)
 
-        # Download button for the summary report
+        # Download button for the report
         st.download_button(
-            label="Download Summary Report",
+            label=f"Download {analysis_type} Report",
             data=report_html,
             file_name=output_file,
             mime="text/html"
         )
 else:
     st.warning("No valid data available. Please upload valid CSV files.")
+
