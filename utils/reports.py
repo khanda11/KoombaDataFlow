@@ -8,18 +8,9 @@ def is_numeric_column(df, column):
     """
     Check if a column contains numeric data by attempting to convert to float
     and checking if any valid numbers exist.
-    
-    Parameters:
-    df (pd.DataFrame): Input DataFrame
-    column (str): Column name to check
-    
-    Returns:
-    bool: True if column contains valid numeric data, False otherwise
     """
     try:
-        # Convert to numeric, coercing errors to NaN
         numeric_series = pd.to_numeric(df[column], errors='coerce')
-        # Check if there are any non-NaN values
         return numeric_series.notna().any()
     except:
         return False
@@ -27,18 +18,10 @@ def is_numeric_column(df, column):
 def get_analyzable_columns(df):
     """
     Get list of columns that contain valid numeric data for analysis.
-    
-    Parameters:
-    df (pd.DataFrame): Input DataFrame
-    
-    Returns:
-    list: List of column names containing numeric data
     """
-    # Columns to exclude from analysis
     excluded_columns = ['Unique ID', 'Client Email', 'Client Phone Number', 
                        'First', 'Last', 'Email', 'Class Year', 'Completed']
     
-    # Check each column for numeric data
     analyzable_cols = []
     for col in df.columns:
         if col not in excluded_columns and is_numeric_column(df, col):
@@ -281,12 +264,7 @@ def generate_time_trend_report(df, output_file=None):
 def generate_summary_report(df, output_file=None):
     """
     Generate a comprehensive HTML report focusing on summary statistics.
-    
-    Parameters:
-    df (pd.DataFrame): Input DataFrame with client data
-    output_file (str): Optional output file path for the report
     """
-    # Initialize HTML content
     html_content = []
     
     # Add report header with CSS
@@ -314,6 +292,25 @@ def generate_summary_report(df, output_file=None):
                 border-bottom: 1px solid #ddd; 
             }
             th { background-color: #f8f9fa; }
+            .stats-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                gap: 20px;
+                margin-bottom: 20px;
+            }
+            .stat-box {
+                background-color: #f8f9fa;
+                padding: 15px;
+                border-radius: 5px;
+                text-align: center;
+            }
+            .stat-label {
+                font-weight: bold;
+                margin-bottom: 5px;
+            }
+            .stat-value {
+                font-size: 1.2em;
+            }
         </style>
     </head>
     <body>
@@ -328,22 +325,36 @@ def generate_summary_report(df, output_file=None):
     """)
     
     # Overall Statistics Section
-    total_clients = len(df['Unique ID'].unique())
+    total_clients = len(df['Unique ID'].unique())  # Updated to use correct case
     total_measurements = len(df)
-    measurements_per_client = df.groupby('Unique ID').size()
+    measurements_per_client = df.groupby('Unique ID').size()  # Updated to use correct case
     
     html_content.append("""
     <div class="section">
         <h2>Overall Statistics</h2>
-        <div class="metric-card">""")
+        <div class="stats-grid">""")
     
-    # Basic statistics
+    # Basic statistics using stat-box layout
     html_content.append(f"""
-            <p><strong>Total Clients:</strong> {total_clients}</p>
-            <p><strong>Total Measurements:</strong> {total_measurements}</p>
-            <p><strong>Average Measurements per Client:</strong> {measurements_per_client.mean():.1f}</p>
-            <p><strong>Median Measurements per Client:</strong> {measurements_per_client.median():.1f}</p>
-            <p><strong>Date Range:</strong> {df['Completed'].min().strftime('%B %d, %Y')} to {df['Completed'].max().strftime('%B %d, %Y')}</p>
+            <div class="stat-box">
+                <div class="stat-label">Total Clients</div>
+                <div class="stat-value">{total_clients}</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-label">Total Measurements</div>
+                <div class="stat-value">{total_measurements}</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-label">Avg Measurements/Client</div>
+                <div class="stat-value">{measurements_per_client.mean():.1f}</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-label">Median Measurements/Client</div>
+                <div class="stat-value">{measurements_per_client.median():.1f}</div>
+            </div>
+        </div>
+        <div class="metric-card">
+            <p><strong>Analysis Period:</strong> {df['Completed'].min().strftime('%B %d, %Y')} to {df['Completed'].max().strftime('%B %d, %Y')}</p>
         </div>
     </div>
     """)
@@ -363,12 +374,14 @@ def generate_summary_report(df, output_file=None):
                     <th>Std Dev</th>
                     <th>Min</th>
                     <th>Max</th>
+                    <th>Valid Responses</th>
                 </tr>
         """)
         
         for col in numeric_cols:
             numeric_data = pd.to_numeric(df[col], errors='coerce')
             stats = numeric_data.describe()
+            valid_count = numeric_data.notna().sum()
             html_content.append(f"""
                 <tr>
                     <td>{col}</td>
@@ -377,6 +390,7 @@ def generate_summary_report(df, output_file=None):
                     <td>{stats['std']:.2f}</td>
                     <td>{stats['min']:.2f}</td>
                     <td>{stats['max']:.2f}</td>
+                    <td>{valid_count}</td>
                 </tr>
             """)
         
@@ -389,12 +403,12 @@ def generate_summary_report(df, output_file=None):
         </div>
         """)
     
-    # Distribution plots for each metric with improved binning and layout
+    # Distribution plots for each metric
     for col in numeric_cols:
         numeric_data = pd.to_numeric(df[col], errors='coerce')
         data = numeric_data.dropna()
         
-        if len(data) > 0:
+        if len(data) >= 2:
             fig = go.Figure()
             
             # Calculate optimal number of bins using Freedman-Diaconis rule
@@ -402,7 +416,7 @@ def generate_summary_report(df, output_file=None):
             iqr = q75 - q25
             bin_width = 2 * iqr / (len(data) ** (1/3)) if iqr > 0 else 0.5
             num_bins = int((data.max() - data.min()) / bin_width) if bin_width > 0 else 30
-            num_bins = min(max(10, num_bins), 50)  # Keep bins between 10 and 50
+            num_bins = min(max(10, num_bins), 50)
             
             fig.add_trace(go.Histogram(
                 x=data,
@@ -451,19 +465,12 @@ def generate_summary_report(df, output_file=None):
 def save_report(df, output_file):
     """
     Generate and save the report to a file.
-    
-    Parameters:
-    df (pd.DataFrame): Input DataFrame with client data
-    output_file (str): Output file path (should end with .html)
     """
     if "time_trend" in output_file.lower():
         report_html = generate_time_trend_report(df, output_file)
     else:
         report_html = generate_summary_report(df, output_file)
     return report_html
-
-
-
 '''
 import pandas as pd
 import plotly.graph_objects as go
