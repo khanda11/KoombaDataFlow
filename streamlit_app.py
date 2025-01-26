@@ -2,17 +2,15 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 from utils import data_processing
-from utils.reports import generate_summary_report, generate_time_trend_report, save_report
+from utils.reports import (
+    display_time_trend_analysis,
+    display_summary_statistics,
+    generate_downloadable_report
+)
 
 # Set up the Streamlit app
 st.title("Koomba Data Analysis")
 st.write("Upload your CSV files to analyze client progress.")
-
-# Upload CSV file(s)
-uploaded_files = st.file_uploader("Upload CSV files", type="csv", accept_multiple_files=True)
-
-# Define required columns for validation
-REQUIRED_COLUMNS = ["Unique ID", "Completed", "Client", "Client's Provider", "Team"]
 
 # Add analysis type selection
 analysis_type = st.radio(
@@ -21,8 +19,17 @@ analysis_type = st.radio(
     help="Choose between analyzing trends over time or viewing summary statistics"
 )
 
+# Define required columns for validation
+REQUIRED_COLUMNS = ["Unique ID", "Completed", "Client", "Client's Provider", "Team"]
+
 # Initialize empty DataFrame for combined data
 combined_data = pd.DataFrame(columns=REQUIRED_COLUMNS)
+
+uploaded_files = st.file_uploader(
+    "Upload CSV files", 
+    type=["csv"], 
+    accept_multiple_files=True
+)
 
 if uploaded_files:
     all_data = []
@@ -95,20 +102,29 @@ if not combined_data.empty:
     if filtered_data.empty:
         st.warning("No data available after applying filters. Adjust the filters and try again.")
     else:
-        # Generate appropriate report based on analysis type
+        # Display interactive analysis based on selected type
         if analysis_type == "Time Trend Analysis":
-            st.subheader("Time Trend Analysis")
-            report_html = generate_time_trend_report(filtered_data)
-            output_file = f"time_trend_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
-        else:  # Summary Statistics
-            st.subheader("Summary Statistics")
-            report_html = generate_summary_report(filtered_data)
-            output_file = f"summary_statistics_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
+            st.header("Time Trend Analysis")
+            display_time_trend_analysis(filtered_data)
+        else:
+            st.header("Summary Statistics")
+            display_summary_statistics(filtered_data)
 
-        # Display the report
-        st.components.v1.html(report_html, height=800, scrolling=True)
-
-        # Download button for the report
+        # Add download button for HTML report
+        st.write("---")
+        st.subheader("Download Report")
+        
+        # Prepare filters for report generation
+        filters = {
+            'provider': selected_provider,
+            'client': selected_client,
+            'team': selected_team,
+            'date_range': date_range
+        }
+        
+        report_html = generate_downloadable_report(filtered_data, analysis_type, filters)
+        output_file = f"{analysis_type.lower().replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
+        
         st.download_button(
             label=f"Download {analysis_type} Report",
             data=report_html,
@@ -117,4 +133,3 @@ if not combined_data.empty:
         )
 else:
     st.warning("No valid data available. Please upload valid CSV files.")
-
