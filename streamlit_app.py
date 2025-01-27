@@ -58,6 +58,17 @@ if uploaded_files:
 
 # Ensure combined_data has content before processing
 if not combined_data.empty:
+    # Add download button for full unfiltered data
+    st.write("---")
+    st.subheader("Download Full Dataset")
+    csv_data = combined_data.to_csv(index=False)
+    st.download_button(
+        label="Download Complete Dataset (CSV)",
+        data=csv_data,
+        file_name=f"complete_dataset_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+        mime="text/csv"
+    )
+    
     # Convert the "Completed" column to datetime
     combined_data["Completed"] = pd.to_datetime(combined_data["Completed"], errors='coerce')
 
