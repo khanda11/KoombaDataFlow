@@ -30,7 +30,7 @@ def calculate_metrics(df, unique_id_col, time_col):
     numeric_columns = df.select_dtypes(include=['number']).columns
     numeric_columns = [col for col in numeric_columns if col != unique_id_col]
     
-    # Initialize results dictionary
+
     metrics = {
         'Total Clients': len(df[unique_id_col].unique()),
         'Total Measurements': len(df),

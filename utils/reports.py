@@ -9,6 +9,12 @@ import streamlit as st
 import plotly.io as pio
 import base64
 
+def normalize_column_name(column):
+    """Remove suffixes like .1, .2 etc from column names and clean up the name."""
+    # Remove .1, .2 etc suffixes
+    base_name = re.sub(r'\.\d+$', '', column)
+    return base_name
+
 def is_numeric_column(df, column):
     """
     Check if a column contains numeric data by attempting to convert to float
@@ -25,16 +31,23 @@ def get_analyzable_columns(df):
     excluded_columns = ['Unique ID', 'Client Email', 'Client Phone Number', 
                        'First', 'Last', 'Email', 'Class Year', 'Completed']
     
-    # Special column for topic exploration
+
     topic_column = "9. Which of these topic areas would you like to explore with Koomba’s Care Team? (Please select all that apply)"
     
-    analyzable_cols = []
+
+    column_mapping = {}
     for col in df.columns:
-        # Keep the existing numeric column logic
-        if col not in excluded_columns and is_numeric_column(df, col):
-            analyzable_cols.append(col)
+        if col not in excluded_columns:
+            normalized_name = normalize_column_name(col)
+            if is_numeric_column(df, col):
+                if normalized_name in column_mapping:
+                   
+                    if '.1' not in col:
+                        column_mapping[normalized_name] = col
+                else:
+                    column_mapping[normalized_name] = col
     
-    return analyzable_cols
+    return list(column_mapping.values())
 
 def display_time_trend_analysis(df):
     """Display interactive time trend analysis directly in Streamlit."""
@@ -44,48 +57,58 @@ def display_time_trend_analysis(df):
         st.warning("No numeric data found for analysis.")
         return None
     
+
+    df['Completed'] = pd.to_datetime(df['Completed'])
+    
     for col in numeric_cols:
-        st.subheader(f"{col} Analysis")
+
+        display_name = normalize_column_name(col)
+        st.subheader(f"{display_name} Analysis")
+        
+     
+        numeric_data = pd.to_numeric(df[col], errors='coerce')
+        valid_data = df[numeric_data.notna()].sort_values('Completed')  # Sort by date
+        
+        if len(valid_data) < 2:
+            st.warning(f"Insufficient data points for {display_name} analysis. Need at least 2 valid measurements.")
+            continue
         
         # Single client or multiple clients logic
         is_single_client = len(df['Unique ID'].unique()) == 1
         
         if is_single_client:
             # Single client analysis
-            client_data = df.sort_values('Completed')
-            numeric_data = pd.to_numeric(client_data[col], errors='coerce')
-            valid_data = client_data[numeric_data.notna()]
+            client_data = valid_data  # Already sorted by date
             
-            if len(valid_data) >= 2:
-                start_val = float(valid_data.iloc[0][col])
-                end_val = float(valid_data.iloc[-1][col])
-                change = end_val - start_val
-                change_pct = ((end_val - start_val) / start_val * 100) if start_val != 0 else 0
-                
-                # Create metrics display
-                col1, col2, col3, col4 = st.columns(4)
-                with col1:
-                    st.metric("Start Value", f"{start_val:.2f}")
-                with col2:
-                    st.metric("End Value", f"{end_val:.2f}")
-                with col3:
-                    st.metric("Absolute Change", f"{change:.2f}", 
-                             f"{'-' if change < 0 else '+' if change > 0 else ''}{abs(change):.2f}")
-                with col4:
-                    st.metric("Percent Change", f"{change_pct:.1f}%",
-                             f"{'-' if change_pct < 0 else '+' if change_pct > 0 else ''}{abs(change_pct):.1f}%")
+            start_val = float(client_data.iloc[0][col])
+            end_val = float(client_data.iloc[-1][col])
+            change = end_val - start_val
+            change_pct = ((end_val - start_val) / start_val * 100) if start_val != 0 else 0
+            
+            # Create metrics display
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Start Value", f"{start_val:.2f}")
+            with col2:
+                st.metric("End Value", f"{end_val:.2f}")
+            with col3:
+                st.metric("Absolute Change", f"{change:.2f}", 
+                         f"{'-' if change < 0 else '+' if change > 0 else ''}{abs(change):.2f}")
+            with col4:
+                st.metric("Percent Change", f"{change_pct:.1f}%",
+                         f"{'-' if change_pct < 0 else '+' if change_pct > 0 else ''}{abs(change_pct):.1f}%")
         
         else:
             # Multiple clients analysis
             client_metrics = []
+            valid_clients = []
+            
             for client_id in df['Unique ID'].unique():
-                client_data = df[df['Unique ID'] == client_id].sort_values('Completed')
-                numeric_data = pd.to_numeric(client_data[col], errors='coerce')
-                valid_data = client_data[numeric_data.notna()]
+                client_data = valid_data[valid_data['Unique ID'] == client_id]  # Already sorted
                 
-                if len(valid_data) >= 2:
-                    start_val = float(valid_data.iloc[0][col])
-                    end_val = float(valid_data.iloc[-1][col])
+                if len(client_data) >= 2:
+                    start_val = float(client_data.iloc[0][col])
+                    end_val = float(client_data.iloc[-1][col])
                     change = end_val - start_val
                     change_pct = ((end_val - start_val) / start_val * 100) if start_val != 0 else 0
                     client_metrics.append({
@@ -94,68 +117,82 @@ def display_time_trend_analysis(df):
                         'change': change,
                         'change_pct': change_pct
                     })
+                    valid_clients.append(client_id)
             
-            if client_metrics:
-                avg_start = np.mean([m['start'] for m in client_metrics])
-                avg_end = np.mean([m['end'] for m in client_metrics])
-                avg_change = np.mean([m['change'] for m in client_metrics])
-                avg_change_pct = np.mean([m['change_pct'] for m in client_metrics])
-                
-                # Create metrics display
-                col1, col2, col3, col4 = st.columns(4)
-                with col1:
-                    st.metric("Avg Start Value", f"{avg_start:.2f}")
-                with col2:
-                    st.metric("Avg End Value", f"{avg_end:.2f}")
-                with col3:
-                    st.metric("Avg Absolute Change", f"{avg_change:.2f}",
-                             f"{'-' if avg_change < 0 else '+' if avg_change > 0 else ''}{abs(avg_change):.2f}")
-                with col4:
-                    st.metric("Avg Percent Change", f"{avg_change_pct:.1f}%",
-                             f"{'-' if avg_change_pct < 0 else '+' if avg_change_pct > 0 else ''}{abs(avg_change_pct):.1f}%")
-        
-        # Create visualization
-        fig = go.Figure()
-        
-        # Add individual client lines
-        for client_id in df['Unique ID'].unique():
-            client_data = df[df['Unique ID'] == client_id].sort_values('Completed')
-            numeric_data = pd.to_numeric(client_data[col], errors='coerce')
-            valid_data = client_data[numeric_data.notna()]
+            if not client_metrics:
+                st.warning(f"No clients have sufficient data points for {display_name} analysis.")
+                continue
             
-            if len(valid_data) >= 2:
+            avg_start = np.mean([m['start'] for m in client_metrics])
+            avg_end = np.mean([m['end'] for m in client_metrics])
+            avg_change = np.mean([m['change'] for m in client_metrics])
+            avg_change_pct = np.mean([m['change_pct'] for m in client_metrics])
+            
+            # Create metrics display
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Avg Start Value", f"{avg_start:.2f}")
+            with col2:
+                st.metric("Avg End Value", f"{avg_end:.2f}")
+            with col3:
+                st.metric("Avg Absolute Change", f"{avg_change:.2f}",
+                         f"{'-' if avg_change < 0 else '+' if avg_change > 0 else ''}{abs(avg_change):.2f}")
+            with col4:
+                st.metric("Avg Percent Change", f"{avg_change_pct:.1f}%",
+                         f"{'-' if avg_change_pct < 0 else '+' if change_pct > 0 else ''}{abs(avg_change_pct):.1f}%")
+        
+        # Create visualization only if we have valid data
+        has_valid_data = is_single_client and len(valid_data) >= 2 or not is_single_client and valid_clients
+        
+        if has_valid_data:
+            fig = go.Figure()
+            
+            if is_single_client:
                 fig.add_trace(go.Scatter(
                     x=valid_data['Completed'],
-                    y=numeric_data[numeric_data.notna()],
+                    y=numeric_data[valid_data.index],
                     mode='lines+markers',
-                    line=dict(color='lightgray'),
-                    name=f'Client {client_id}' if is_single_client else None,
-                    showlegend=is_single_client
+                    name=display_name
                 ))
-        
-        if not is_single_client:
-            # Add average trend line for multiple clients
-            avg_by_date = df.groupby('Completed')[col].apply(
-                lambda x: pd.to_numeric(x, errors='coerce').mean()
-            ).dropna()
+            else:
+                # Add individual client lines for valid clients only
+                for client_id in valid_clients:
+                    client_data = valid_data[valid_data['Unique ID'] == client_id]
+                    fig.add_trace(go.Scatter(
+                        x=client_data['Completed'],
+                        y=pd.to_numeric(client_data[col], errors='coerce'),
+                        mode='lines+markers',
+                        line=dict(color='lightgray'),
+                        name=f'Client {client_id}' if is_single_client else None,
+                        showlegend=is_single_client
+                    ))
+                
+                # Add average trend line for multiple clients
+                avg_by_date = valid_data.groupby('Completed')[col].apply(
+                    lambda x: pd.to_numeric(x, errors='coerce').mean()
+                ).sort_index()  # Sort by date
+                
+                if len(avg_by_date) >= 2:
+                    fig.add_trace(go.Scatter(
+                        x=avg_by_date.index,
+                        y=avg_by_date.values,
+                        mode='lines+markers',
+                        name='Average',
+                        line=dict(color='blue', width=3)
+                    ))
             
-            if len(avg_by_date) >= 2:
-                fig.add_trace(go.Scatter(
-                    x=avg_by_date.index,
-                    y=avg_by_date.values,
-                    mode='lines+markers',
-                    name='Average',
-                    line=dict(color='blue', width=3)
-                ))
-        
-        fig.update_layout(
-            title=f'{col} Progress Over Time',
-            xaxis_title='Date',
-            yaxis_title='Score',
-            height=400
-        )
-        
-        st.plotly_chart(fig, use_container_width=True)
+            fig.update_layout(
+                title=f'{display_name} Progress Over Time',
+                xaxis_title='Date',
+                yaxis_title='Score',
+                height=400,
+                xaxis=dict(
+                    type='date',
+                    tickformat='%b %d\n%Y'
+                )
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
 
 def display_summary_statistics(df):
     """Display interactive summary statistics directly in Streamlit."""
@@ -166,7 +203,7 @@ def display_summary_statistics(df):
     total_measurements = len(df)
     measurements_per_client = df.groupby('Unique ID').size()
     
-    # Display metrics in columns
+   
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric("Total Clients", total_clients)
@@ -318,6 +355,10 @@ def generate_report_header(df, analysis_type, filters):
     
     return filter_html
 
+
+
+
+
 def analyze_topic_exploration(df):
     """Analyze topic exploration with robust column handling."""
     text_columns = [
@@ -348,6 +389,7 @@ def analyze_topic_exploration(df):
         total_responses = len(df[col].dropna())
         topic_percentages = (topic_counts / total_responses * 100).round(2)
         
+        # Create the Plotly figure
         fig = go.Figure(data=[
             go.Bar(
                 x=topic_percentages.index, 
@@ -362,18 +404,19 @@ def analyze_topic_exploration(df):
             xaxis_title='Topics',
             yaxis_title='Percentage of Participants',
             height=500,
-            xaxis_tickangle=-45
+            xaxis_tickangle=-45,
+            xaxis_tickfont_size=8,  # Increase font size for x-axis labels
+            bargap=0.1  # Adjust the gap between bars
         )
         
-        # Convert to static image for downloadable report
-        img_bytes = pio.to_image(fig, format='png', width=800, height=500)
+        # Render the figure as a static image
+        img_bytes = pio.to_image(fig, format='png', width=1200, height=600)
         encoded_img = base64.b64encode(img_bytes).decode('utf-8')
         static_img_html = f'<img src="data:image/png;base64,{encoded_img}" style="max-width:100%; height:auto;">'
         
         return {
             'percentages': topic_percentages.to_dict(),
-            'figure': pio.to_html(fig, full_html=False),  # For web
-            'static_image': static_img_html  # For download
+            'static_image': static_img_html
         }
     
     return None
