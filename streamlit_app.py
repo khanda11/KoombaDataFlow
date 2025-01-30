@@ -8,6 +8,13 @@ from utils.reports import (
     generate_downloadable_report
 )
 
+# Set page config
+st.set_page_config(
+    page_title="Koomba Data Analysis",
+    page_icon="📊",
+    layout="wide"
+)
+
 # Set up the Streamlit app
 st.title("Koomba Data Analysis")
 st.write("Upload your CSV files to analyze client progress.")
@@ -25,10 +32,12 @@ REQUIRED_COLUMNS = ["Unique ID", "Completed", "Client", "Client's Provider", "Te
 # Initialize empty DataFrame for combined data
 combined_data = pd.DataFrame(columns=REQUIRED_COLUMNS)
 
+# File upload section
 uploaded_files = st.file_uploader(
     "Upload CSV files", 
     type=["csv"], 
-    accept_multiple_files=True
+    accept_multiple_files=True,
+    help="Upload one or more CSV files containing client data"
 )
 
 if uploaded_files:
@@ -72,36 +81,89 @@ if not combined_data.empty:
     # Convert the "Completed" column to datetime
     combined_data["Completed"] = pd.to_datetime(combined_data["Completed"], errors='coerce')
 
+    # Calculate visit numbers for the entire dataset
+    combined_data['Visit_Number'] = combined_data.groupby('Unique ID')['Completed'].rank(method='dense')
+    max_visits = int(combined_data['Visit_Number'].max())
+
     # Sidebar filters
-    st.sidebar.header("Filters")
+    with st.sidebar:
+        st.header("Filters")
+        
+        # Create tabs for different filter categories
+        date_tab, client_tab, visit_tab = st.tabs(["Date Filters", "Client Filters", "Visit Filters"])
+        
+        with date_tab:
+            # Date Range Filter
+            min_date = combined_data["Completed"].min().date()
+            max_date = combined_data["Completed"].max().date()
+            date_range = st.date_input(
+                "Select Date Range",
+                [min_date, max_date],
+                min_value=min_date,
+                max_value=max_date,
+                help="Filter data by date range"
+            )
 
-    # Date Range Filter
-    min_date = combined_data["Completed"].min().date()
-    max_date = combined_data["Completed"].max().date()
-    date_range = st.sidebar.date_input(
-        "Select Date Range", [min_date, max_date], min_value=min_date, max_value=max_date
-    )
+        with client_tab:
+            # Provider Filter
+            providers = ["All"] + sorted(combined_data["Client's Provider"].dropna().unique().tolist())
+            selected_provider = st.selectbox(
+                "Select Provider",
+                providers,
+                help="Filter by healthcare provider"
+            )
 
-    # Provider Filter
-    providers = ["All"] + sorted(combined_data["Client's Provider"].dropna().unique().tolist())
-    selected_provider = st.sidebar.selectbox("Select Provider", providers)
+            # Client Filter
+            clients = ["All"] + sorted(combined_data["Client"].dropna().unique().tolist())
+            selected_client = st.selectbox(
+                "Select Client",
+                clients,
+                help="Filter by specific client"
+            )
 
-    # Client Filter
-    clients = ["All"] + sorted(combined_data["Client"].dropna().unique().tolist())
-    selected_client = st.sidebar.selectbox("Select Client", clients)
+            # Team Filter
+            teams = ["All"] + sorted(combined_data["Team"].dropna().unique().tolist())
+            selected_team = st.selectbox(
+                "Select Team",
+                teams,
+                help="Filter by team"
+            )
 
-    # Team Filter
-    teams = ["All"] + sorted(combined_data["Team"].dropna().unique().tolist())
-    selected_team = st.sidebar.selectbox("Select Team", teams)
+        with visit_tab:
+            # Visit Number Filter
+            enable_visit_filter = st.checkbox(
+                "Filter by Visit Number",
+                False,
+                help="Enable filtering by visit sequence number"
+            )
+            
+            if enable_visit_filter:
+                visit_range = st.slider(
+                    "Select Visit Range",
+                    min_value=1,
+                    max_value=max_visits,
+                    value=(1, max_visits),
+                    help="Filter data to show only selected visit numbers"
+                )
+                
+                # Option to show only clients with complete data for selected range
+                complete_data_only = st.checkbox(
+                    "Show only clients with complete data for selected range",
+                    False,
+                    help="Filter out clients who don't have data for all visits in the selected range"
+                )
 
     # Apply filters
     filtered_data = combined_data.copy()
 
+    # Date filter
     if len(date_range) == 2:
         filtered_data = filtered_data[
             (filtered_data["Completed"].dt.date >= date_range[0]) &
             (filtered_data["Completed"].dt.date <= date_range[1])
         ]
+
+    # Client filters
     if selected_provider != "All":
         filtered_data = filtered_data[filtered_data["Client's Provider"] == selected_provider]
     if selected_client != "All":
@@ -109,10 +171,40 @@ if not combined_data.empty:
     if selected_team != "All":
         filtered_data = filtered_data[filtered_data["Team"] == selected_team]
 
+    # Visit number filter
+    if enable_visit_filter:
+        filtered_data = filtered_data[
+            filtered_data['Visit_Number'].between(visit_range[0], visit_range[1])
+        ]
+        
+        if complete_data_only:
+            # Get clients with complete data for the selected range
+            visit_counts = filtered_data.groupby('Unique ID')['Visit_Number'].agg(['min', 'max', 'count'])
+            complete_clients = visit_counts[
+                (visit_counts['min'] <= visit_range[0]) &
+                (visit_counts['max'] >= visit_range[1]) &
+                (visit_counts['count'] >= (visit_range[1] - visit_range[0] + 1))
+            ].index
+            filtered_data = filtered_data[filtered_data['Unique ID'].isin(complete_clients)]
+
     # Check if data remains after filtering
     if filtered_data.empty:
-        st.warning("No data available after applying filters. Adjust the filters and try again.")
+        st.warning("No data available after applying filters. Please adjust the filters and try again.")
     else:
+        # Display filter summary
+        st.write("---")
+        st.subheader("Applied Filters")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.write(f"Date Range: {date_range[0]} to {date_range[1]}")
+        with col2:
+            st.write(f"Provider: {selected_provider}")
+            st.write(f"Team: {selected_team}")
+        with col3:
+            st.write(f"Clients: {len(filtered_data['Unique ID'].unique())}")
+            if enable_visit_filter:
+                st.write(f"Visit Range: {visit_range[0]} to {visit_range[1]}")
+
         # Display interactive analysis based on selected type
         if analysis_type == "Time Trend Analysis":
             st.header("Time Trend Analysis")
@@ -130,7 +222,8 @@ if not combined_data.empty:
             'provider': selected_provider,
             'client': selected_client,
             'team': selected_team,
-            'date_range': date_range
+            'date_range': date_range,
+            'visit_range': visit_range if enable_visit_filter else None
         }
         
         report_html = generate_downloadable_report(filtered_data, analysis_type, filters)
@@ -143,4 +236,4 @@ if not combined_data.empty:
             mime="text/html"
         )
 else:
-    st.warning("No valid data available. Please upload valid CSV files.")
+    st.info("👆 Please upload your CSV files to begin analysis.")

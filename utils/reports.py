@@ -29,59 +29,61 @@ def is_numeric_column(df, column):
 def get_analyzable_columns(df):
     """Get list of columns that contain valid numeric data for analysis."""
     excluded_columns = ['Unique ID', 'Client Email', 'Client Phone Number', 
-                       'First', 'Last', 'Email', 'Class Year', 'Completed']
+                       'First', 'Last', 'Email', 'Class Year', 'Completed', 'Visit_Number',
+                       'GAD7_Severity']
     
-
-    topic_column = "9. Which of these topic areas would you like to explore with Koomba’s Care Team? (Please select all that apply)"
+    topic_column = "9. Which of these topic areas would you like to explore with Koomba's Care Team? (Please select all that apply)"
     
-
+    score_columns = []
+    if 'GAD7_Total_Score' in df.columns:
+        score_columns.append('GAD7_Total_Score')
+    if 'SMHAT_Total_Score' in df.columns:
+        score_columns.append('SMHAT_Total_Score')
+    
     column_mapping = {}
     for col in df.columns:
-        if col not in excluded_columns:
+        if col not in excluded_columns and col not in score_columns:
             normalized_name = normalize_column_name(col)
             if is_numeric_column(df, col):
                 if normalized_name in column_mapping:
-                   
                     if '.1' not in col:
                         column_mapping[normalized_name] = col
                 else:
                     column_mapping[normalized_name] = col
     
-    return list(column_mapping.values())
+    return score_columns + list(column_mapping.values())
 
-def display_time_trend_analysis(df):
-    """Display interactive time trend analysis directly in Streamlit."""
-    numeric_cols = get_analyzable_columns(df)
-    
-    if not numeric_cols:
-        st.warning("No numeric data found for analysis.")
-        return None
-    
+def create_assessment_visualization(df, assessment_type, view_type="By Date"):
+    """Create visualization for assessment scores with support for date and visit number views."""
+    try:
+        score_column = f"{assessment_type}_Total_Score"
+        if score_column not in df.columns:
+            return None
+            
+        fig = make_subplots(specs=[[{"secondary_y": True}]])
+        
+        # Sort data based on view type
+        if view_type == "By Date":
+            df_sorted = df.sort_values('Completed')
+            x_axis = 'Completed'
+            x_title = 'Date'
+        else:
+            df_sorted = df.sort_values(['Unique ID', 'Visit_Number'])
+            x_axis = 'Visit_Number'
+            x_title = 'Visit Number'
 
-    df['Completed'] = pd.to_datetime(df['Completed'])
-    
-    for col in numeric_cols:
-
-        display_name = normalize_column_name(col)
-        st.subheader(f"{display_name} Analysis")
-        
-     
-        numeric_data = pd.to_numeric(df[col], errors='coerce')
-        valid_data = df[numeric_data.notna()].sort_values('Completed')  # Sort by date
-        
-        if len(valid_data) < 2:
-            st.warning(f"Insufficient data points for {display_name} analysis. Need at least 2 valid measurements.")
-            continue
-        
-        # Single client or multiple clients logic
+        # Check if we're dealing with single or multiple clients
         is_single_client = len(df['Unique ID'].unique()) == 1
+        metrics_html = ""
         
         if is_single_client:
-            # Single client analysis
-            client_data = valid_data  # Already sorted by date
-            
-            start_val = float(client_data.iloc[0][col])
-            end_val = float(client_data.iloc[-1][col])
+            # Single client visualization
+            valid_data = df_sorted[df_sorted[score_column].notna()]
+            if len(valid_data) < 2:
+                return None
+
+            start_val = float(valid_data.iloc[0][score_column])
+            end_val = float(valid_data.iloc[-1][score_column])
             change = end_val - start_val
             change_pct = ((end_val - start_val) / start_val * 100) if start_val != 0 else 0
             
@@ -93,22 +95,34 @@ def display_time_trend_analysis(df):
                 st.metric("End Value", f"{end_val:.2f}")
             with col3:
                 st.metric("Absolute Change", f"{change:.2f}", 
-                         f"{'-' if change < 0 else '+' if change > 0 else ''}{abs(change):.2f}")
+                         f"{'+' if change > 0 else ''}{change:.2f}")
             with col4:
                 st.metric("Percent Change", f"{change_pct:.1f}%",
-                         f"{'-' if change_pct < 0 else '+' if change_pct > 0 else ''}{abs(change_pct):.1f}%")
-        
+                         f"{'+' if change_pct > 0 else ''}{change_pct:.1f}%")
+
+            fig.add_trace(
+                go.Scatter(
+                    x=valid_data[x_axis],
+                    y=valid_data[score_column],
+                    name=f"{assessment_type} Score",
+                    mode='lines+markers',
+                    text=valid_data['Visit_Number'] if view_type == "By Date" else None
+                ),
+                secondary_y=False
+            )
         else:
-            # Multiple clients analysis
-            client_metrics = []
+            # Multiple clients visualization
             valid_clients = []
+            client_metrics = []
             
             for client_id in df['Unique ID'].unique():
-                client_data = valid_data[valid_data['Unique ID'] == client_id]  # Already sorted
-                
+                client_data = df_sorted[
+                    (df_sorted['Unique ID'] == client_id) & 
+                    (df_sorted[score_column].notna())
+                ]
                 if len(client_data) >= 2:
-                    start_val = float(client_data.iloc[0][col])
-                    end_val = float(client_data.iloc[-1][col])
+                    start_val = float(client_data.iloc[0][score_column])
+                    end_val = float(client_data.iloc[-1][score_column])
                     change = end_val - start_val
                     change_pct = ((end_val - start_val) / start_val * 100) if start_val != 0 else 0
                     client_metrics.append({
@@ -118,92 +132,298 @@ def display_time_trend_analysis(df):
                         'change_pct': change_pct
                     })
                     valid_clients.append(client_id)
+                    fig.add_trace(
+                        go.Scatter(
+                            x=client_data[x_axis],
+                            y=client_data[score_column],
+                            name=f"Client {client_id}",
+                            mode='lines+markers',
+                            line=dict(color='lightgray'),
+                            text=client_data['Visit_Number'] if view_type == "By Date" else None
+                        ),
+                        secondary_y=False
+                    )
             
-            if not client_metrics:
-                st.warning(f"No clients have sufficient data points for {display_name} analysis.")
-                continue
-            
-            avg_start = np.mean([m['start'] for m in client_metrics])
-            avg_end = np.mean([m['end'] for m in client_metrics])
-            avg_change = np.mean([m['change'] for m in client_metrics])
-            avg_change_pct = np.mean([m['change_pct'] for m in client_metrics])
-            
-            # Create metrics display
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("Avg Start Value", f"{avg_start:.2f}")
-            with col2:
-                st.metric("Avg End Value", f"{avg_end:.2f}")
-            with col3:
-                st.metric("Avg Absolute Change", f"{avg_change:.2f}",
-                         f"{'-' if avg_change < 0 else '+' if avg_change > 0 else ''}{abs(avg_change):.2f}")
-            with col4:
-                st.metric("Avg Percent Change", f"{avg_change_pct:.1f}%",
-                         f"{'-' if avg_change_pct < 0 else '+' if change_pct > 0 else ''}{abs(avg_change_pct):.1f}%")
-        
-        # Create visualization only if we have valid data
-        has_valid_data = is_single_client and len(valid_data) >= 2 or not is_single_client and valid_clients
-        
-        if has_valid_data:
-            fig = go.Figure()
-            
-            if is_single_client:
-                fig.add_trace(go.Scatter(
-                    x=valid_data['Completed'],
-                    y=numeric_data[valid_data.index],
-                    mode='lines+markers',
-                    name=display_name
-                ))
+            if client_metrics:
+                avg_start = np.mean([m['start'] for m in client_metrics])
+                avg_end = np.mean([m['end'] for m in client_metrics])
+                avg_change = np.mean([m['change'] for m in client_metrics])
+                avg_change_pct = np.mean([m['change_pct'] for m in client_metrics])
+                
+                # Create metrics display
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Avg Start Value", f"{avg_start:.2f}")
+                with col2:
+                    st.metric("Avg End Value", f"{avg_end:.2f}")
+                with col3:
+                    st.metric("Avg Absolute Change", f"{avg_change:.2f}",
+                             f"{'+' if avg_change > 0 else ''}{avg_change:.2f}")
+                with col4:
+                    st.metric("Avg Percent Change", f"{avg_change_pct:.1f}%",
+                             f"{'+' if avg_change_pct > 0 else ''}{avg_change_pct:.1f}%")
+
+                if valid_clients:
+                    valid_data = df_sorted[
+                        (df_sorted['Unique ID'].isin(valid_clients)) & 
+                        (df_sorted[score_column].notna())
+                    ]
+                    
+                    if view_type == "By Date":
+                        avg_by_date = valid_data.groupby('Completed')[score_column].mean()
+                        x_vals = avg_by_date.index
+                        y_vals = avg_by_date.values
+                    else:
+                        avg_by_visit = valid_data.groupby('Visit_Number')[score_column].mean()
+                        x_vals = avg_by_visit.index
+                        y_vals = avg_by_visit.values
+
+                    fig.add_trace(
+                        go.Scatter(
+                            x=x_vals,
+                            y=y_vals,
+                            name='Average',
+                            mode='lines+markers',
+                            line=dict(color='blue', width=3)
+                        ),
+                        secondary_y=False
+                    )
             else:
-                # Add individual client lines for valid clients only
-                for client_id in valid_clients:
-                    client_data = valid_data[valid_data['Unique ID'] == client_id]
-                    fig.add_trace(go.Scatter(
-                        x=client_data['Completed'],
-                        y=pd.to_numeric(client_data[col], errors='coerce'),
-                        mode='lines+markers',
-                        line=dict(color='lightgray'),
-                        name=f'Client {client_id}' if is_single_client else None,
-                        showlegend=is_single_client
-                    ))
-                
-                # Add average trend line for multiple clients
-                avg_by_date = valid_data.groupby('Completed')[col].apply(
-                    lambda x: pd.to_numeric(x, errors='coerce').mean()
-                ).sort_index()  # Sort by date
-                
-                if len(avg_by_date) >= 2:
-                    fig.add_trace(go.Scatter(
-                        x=avg_by_date.index,
-                        y=avg_by_date.values,
-                        mode='lines+markers',
-                        name='Average',
-                        line=dict(color='blue', width=3)
-                    ))
-            
+                return None
+        
+        # Update layout based on view type
+        fig.update_layout(
+            title=f"{assessment_type} Assessment Scores Over {x_title}",
+            xaxis_title=x_title,
+            yaxis_title=f"{assessment_type} Score",
+            height=400
+        )
+
+        if view_type == "By Date":
             fig.update_layout(
-                title=f'{display_name} Progress Over Time',
-                xaxis_title='Date',
-                yaxis_title='Score',
-                height=400,
                 xaxis=dict(
                     type='date',
                     tickformat='%b %d\n%Y'
                 )
             )
+        else:
+            fig.update_layout(
+                xaxis=dict(
+                    tickmode='linear',
+                    dtick=1
+                )
+            )
+        
+        return fig
+    except Exception as e:
+        st.error(f"Error creating {assessment_type} visualization: {str(e)}")
+        return None
+def display_time_trend_analysis(df):
+    """Display interactive time trend analysis including assessment scores."""
+    # Add view type selector
+    view_type = st.radio("View Data By:", ["By Date", "By Visit Number"])
+    
+    # Get numeric columns for analysis
+    numeric_cols = get_analyzable_columns(df)
+    
+    # Check for and display assessment scores first
+    if 'GAD7_Total_Score' in df.columns:
+        st.subheader("GAD-7 Assessment Analysis")
+        gad7_fig = create_assessment_visualization(df, 'GAD7', view_type)  # Pass view_type here
+        if gad7_fig:
+            st.plotly_chart(gad7_fig, use_container_width=True)
             
-            st.plotly_chart(fig, use_container_width=True)
-
+            
+    
+    if 'SMHAT_Total_Score' in df.columns:
+        st.subheader("SMHAT Assessment Analysis")
+        smhat_fig = create_assessment_visualization(df, 'SMHAT', view_type)  # Pass view_type here
+        if smhat_fig:
+            st.plotly_chart(smhat_fig, use_container_width=True)
+            
+    
+    # Continue with analysis for other numeric columns
+    for col in numeric_cols:
+        if not col.endswith('_Score') and not col.endswith('_Severity'):
+            display_name = normalize_column_name(col)
+            st.subheader(f"{display_name} Analysis")
+            
+            numeric_data = pd.to_numeric(df[col], errors='coerce')
+            valid_data = df[numeric_data.notna()]
+            
+            # Sort data based on view type
+            if view_type == "By Date":
+                valid_data = valid_data.sort_values('Completed')
+                x_axis = 'Completed'
+                x_title = 'Date'
+            else:
+                valid_data = valid_data.sort_values(['Unique ID', 'Visit_Number'])
+                x_axis = 'Visit_Number'
+                x_title = 'Visit Number'
+            
+            if len(valid_data) < 2:
+                st.warning(f"Insufficient data points for {display_name} analysis. Need at least 2 valid measurements.")
+                continue
+            
+            # Single client or multiple clients logic
+            is_single_client = len(df['Unique ID'].unique()) == 1
+            
+            if is_single_client:
+                # Single client analysis
+                start_val = float(valid_data.iloc[0][col])
+                end_val = float(valid_data.iloc[-1][col])
+                change = end_val - start_val
+                change_pct = ((end_val - start_val) / start_val * 100) if start_val != 0 else 0
+                
+                # Create metrics display
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Start Value", f"{start_val:.2f}")
+                with col2:
+                    st.metric("End Value", f"{end_val:.2f}")
+                with col3:
+                    st.metric("Absolute Change", f"{change:.2f}", 
+                             f"{'-' if change < 0 else '+' if change > 0 else ''}{abs(change):.2f}")
+                with col4:
+                    st.metric("Percent Change", f"{change_pct:.1f}%",
+                             f"{'-' if change_pct < 0 else '+' if change_pct > 0 else ''}{abs(change_pct):.1f}%")
+            
+            else:
+                # Multiple clients analysis
+                client_metrics = []
+                valid_clients = []
+                
+                for client_id in df['Unique ID'].unique():
+                    client_data = valid_data[valid_data['Unique ID'] == client_id]
+                    
+                    if len(client_data) >= 2:
+                        start_val = float(client_data.iloc[0][col])
+                        end_val = float(client_data.iloc[-1][col])
+                        change = end_val - start_val
+                        change_pct = ((end_val - start_val) / start_val * 100) if start_val != 0 else 0
+                        client_metrics.append({
+                            'start': start_val,
+                            'end': end_val,
+                            'change': change,
+                            'change_pct': change_pct
+                        })
+                        valid_clients.append(client_id)
+                
+                if client_metrics:
+                    avg_start = np.mean([m['start'] for m in client_metrics])
+                    avg_end = np.mean([m['end'] for m in client_metrics])
+                    avg_change = np.mean([m['change'] for m in client_metrics])
+                    avg_change_pct = np.mean([m['change_pct'] for m in client_metrics])
+                    
+                    # Create metrics display
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric("Avg Start Value", f"{avg_start:.2f}")
+                    with col2:
+                        st.metric("Avg End Value", f"{avg_end:.2f}")
+                    with col3:
+                        st.metric("Avg Absolute Change", f"{avg_change:.2f}",
+                                 f"{'-' if avg_change < 0 else '+' if avg_change > 0 else ''}{abs(avg_change):.2f}")
+                    with col4:
+                        st.metric("Avg Percent Change", f"{avg_change_pct:.1f}%",
+                                 f"{'-' if avg_change_pct < 0 else '+' if avg_change_pct > 0 else ''}{abs(avg_change_pct):.1f}%")
+            
+            # Create visualization
+            has_valid_data = is_single_client and len(valid_data) >= 2 or not is_single_client and valid_clients
+            
+            if has_valid_data:
+                fig = go.Figure()
+                
+                if is_single_client:
+                    fig.add_trace(go.Scatter(
+                        x=valid_data[x_axis],
+                        y=numeric_data[valid_data.index],
+                        mode='lines+markers',
+                        name=display_name,
+                        text=valid_data['Visit_Number'] if view_type == "By Date" else None
+                    ))
+                else:
+                    # Add individual client lines
+                    for client_id in valid_clients:
+                        client_data = valid_data[valid_data['Unique ID'] == client_id]
+                        fig.add_trace(go.Scatter(
+                            x=client_data[x_axis],
+                            y=pd.to_numeric(client_data[col], errors='coerce'),
+                            mode='lines+markers',
+                            line=dict(color='lightgray'),
+                            name=f'Client {client_id}',
+                            text=client_data['Visit_Number'] if view_type == "By Date" else None,
+                            showlegend=True
+                        ))
+                    
+                    # Add average trend line
+                    if view_type == "By Date":
+                        avg_by_date = valid_data.groupby('Completed')[col].apply(
+                            lambda x: pd.to_numeric(x, errors='coerce').mean()
+                        ).sort_index()
+                        x_vals = avg_by_date.index
+                        y_vals = avg_by_date.values
+                    else:
+                        avg_by_visit = valid_data.groupby('Visit_Number')[col].apply(
+                            lambda x: pd.to_numeric(x, errors='coerce').mean()
+                        ).sort_index()
+                        x_vals = avg_by_visit.index
+                        y_vals = avg_by_visit.values
+                    
+                    if len(x_vals) >= 2:
+                        fig.add_trace(go.Scatter(
+                            x=x_vals,
+                            y=y_vals,
+                            mode='lines+markers',
+                            name='Average',
+                            line=dict(color='blue', width=3)
+                        ))
+                
+                # Update layout based on view type
+                fig.update_layout(
+                    title=f'{display_name} Progress Over {x_title}',
+                    xaxis_title=x_title,
+                    yaxis_title='Score',
+                    height=400
+                )
+                
+                if view_type == "By Date":
+                    fig.update_layout(
+                        xaxis=dict(
+                            type='date',
+                            tickformat='%b %d\n%Y'
+                        )
+                    )
+                else:
+                    fig.update_layout(
+                        xaxis=dict(
+                            tickmode='linear',
+                            dtick=1
+                        )
+                    )
+                
+                st.plotly_chart(fig, use_container_width=True)
 def display_summary_statistics(df):
-    """Display interactive summary statistics directly in Streamlit."""
-    # Overall Statistics Section
+    """Display interactive summary statistics including assessment scores and topic analysis."""
     st.header("Overall Statistics")
+    
+    # Display assessment statistics first if available
+    if 'GAD7_Total_Score' in df.columns:
+        st.subheader("GAD-7 Assessment Summary")
+        gad7_stats = df['GAD7_Total_Score'].describe()
+        st.write("GAD-7 Total Score Statistics:")
+        st.write(pd.DataFrame(gad7_stats).transpose())
+    
+    if 'SMHAT_Total_Score' in df.columns:
+        st.subheader("SMHAT Assessment Summary")
+        smhat_stats = df['SMHAT_Total_Score'].describe()
+        st.write("SMHAT Total Score Statistics:")
+        st.write(pd.DataFrame(smhat_stats).transpose())
     
     total_clients = len(df['Unique ID'].unique())
     total_measurements = len(df)
     measurements_per_client = df.groupby('Unique ID').size()
     
-   
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric("Total Clients", total_clients)
@@ -216,14 +436,12 @@ def display_summary_statistics(df):
     
     st.write(f"Analysis Period: {df['Completed'].min().strftime('%B %d, %Y')} to {df['Completed'].max().strftime('%B %d, %Y')}")
     
-    # Get analyzable numeric columns
-    numeric_cols = get_analyzable_columns(df)
-    
-    # Specific handling for Topic Exploration
-    topic_column = "9. Which of these topic areas would you like to explore with Koomba’s Care Team? (Please select all that apply)"
+    # Add Topic Analysis Section
+    topic_column = "9. Which of these topic areas would you like to explore with Koomba's Care Team? (Please select all that apply)"
     if topic_column in df.columns:
-        st.header("Topic Exploration")
+        st.header("Topic Exploration Analysis")
         
+        # Process topic data
         all_topics = []
         for topics in df[topic_column].dropna():
             split_topics = [
@@ -238,25 +456,40 @@ def display_summary_statistics(df):
             total_responses = len(df[topic_column].dropna())
             topic_percentages = (topic_counts / total_responses * 100).round(2)
             
+            # Create bar chart
             fig = go.Figure(data=[
                 go.Bar(
-                    x=topic_percentages.index, 
+                    x=topic_percentages.index,
                     y=topic_percentages.values,
-                    text=[f'{p}%' for p in topic_percentages.values],
-                    textposition='auto'
+                    text=[f'{p:.1f}%' for p in topic_percentages.values],
+                    textposition='auto',
+                    marker_color='rgb(55, 83, 109)'
                 )
             ])
             
             fig.update_layout(
-                title='Care Team Topic Exploration',
+                title='Care Team Topic Preferences',
                 xaxis_title='Topics',
                 yaxis_title='Percentage of Participants',
                 height=500,
-                xaxis_tickangle=-45
+                xaxis_tickangle=-45,
+                showlegend=False,
+                margin=dict(b=100)  # Add bottom margin for rotated labels
             )
             
             st.plotly_chart(fig, use_container_width=True)
+            
+            # Display topic percentages in a table
+            st.subheader("Topic Selection Breakdown")
+            topic_df = pd.DataFrame({
+                'Topic': topic_percentages.index,
+                'Percentage': [f'{p:.1f}%' for p in topic_percentages.values],
+                'Count': topic_counts.values
+            })
+            st.dataframe(topic_df, use_container_width=True)
     
+    # Get analyzable numeric columns
+    numeric_cols = get_analyzable_columns(df)
     
     if numeric_cols:
         st.header("Metric Summaries")
@@ -315,7 +548,6 @@ def display_summary_statistics(df):
                 st.plotly_chart(fig, use_container_width=True)
     else:
         st.warning("No numeric data found for analysis.")
-
 def plot_to_html(fig):
     """Convert Plotly figure to base64 encoded image for embedding in HTML."""
     img_bytes = pio.to_image(fig, format='png', width=800, height=400)
