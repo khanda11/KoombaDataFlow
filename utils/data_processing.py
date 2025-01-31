@@ -37,6 +37,8 @@ def get_smhat_questions():
         "I took unusual risks off-field."
     ]
 
+
+
 def calculate_assessment_scores(df):
     """
     Calculate total GAD-7 and SMHAT scores for each response.
@@ -48,70 +50,60 @@ def calculate_assessment_scores(df):
     gad7_questions = get_gad7_questions()
     smhat_questions = get_smhat_questions()
     
-    # Find matching columns in the dataframe using flexible matching
-    gad7_cols = []
-    smhat_cols = []
-    
-    # More robust column matching that handles suffixes
-    for col in df.columns:
-        # Remove any .1, .2 etc suffixes for matching
-        base_col = re.sub(r'\.\d+$', '', col)
-        
-        # Convert to lowercase for case-insensitive matching
-        base_col_lower = base_col.lower()
-        
-        # Match GAD-7 questions
-        for q in gad7_questions:
-            if q.lower() == base_col_lower:
-                gad7_cols.append(col)
-                break
-                
-        # Match SMHAT questions
-        for q in smhat_questions:
-            if q.lower() == base_col_lower:
-                smhat_cols.append(col)
-                break
-    
-    # Group columns by their base names (without suffixes)
-    gad7_base_cols = {}
-    for col in gad7_cols:
-        base_name = re.sub(r'\.\d+$', '', col)
-        if base_name not in gad7_base_cols:
-            gad7_base_cols[base_name] = []
-        gad7_base_cols[base_name].append(col)
-    
-    smhat_base_cols = {}
-    for col in smhat_cols:
-        base_name = re.sub(r'\.\d+$', '', col)
-        if base_name not in smhat_base_cols:
-            smhat_base_cols[base_name] = []
-        smhat_base_cols[base_name].append(col)
-    
-    # Calculate scores for each set of columns
-    for cols in gad7_base_cols.values():
-        # Convert columns to numeric
-        for col in cols:
-            df_with_scores[col] = pd.to_numeric(df_with_scores[col], errors='coerce')
+    # Robust column matching
+    def match_columns(assessment_questions):
+        matched_cols = []
+        for base_question in assessment_questions:
+            # Normalize base question
+            base_norm = base_question.lower().replace('?', '').strip()
             
-            # Calculate GAD-7 total score for this column set
-            if len(cols) > 0:
-                score_col = f"GAD7_Total_Score{'.1' if '.' in col else ''}"
-                df_with_scores.loc[df_with_scores[col].notna(), score_col] = df_with_scores[cols].sum(axis=1)
-                
-                
-    # Do the same for SMHAT
-    for cols in smhat_base_cols.values():
-        for col in cols:
-            df_with_scores[col] = pd.to_numeric(df_with_scores[col], errors='coerce')
+            # Find matching columns with at least one non-null value
+            matching_cols = [
+                col for col in df.columns 
+                if (base_norm in re.sub(r'\.\d+$', '', col).lower().replace('?', '').strip()) 
+                and df[col].notna().any()
+            ]
             
-            # Calculate SMHAT total score for this column set
-            if len(cols) > 0:
-                score_col = f"SMHAT_Total_Score{'.1' if '.' in col else ''}"
-                df_with_scores.loc[df_with_scores[col].notna(), score_col] = df_with_scores[cols].sum(axis=1)
+            # If no match found, print debug info
+            if not matching_cols:
+                print(f"No match found for: {base_question}")
+                return []
+            
+            matched_cols.append(matching_cols[0])
+        
+        return matched_cols
     
-    # Debug information
-    print(f"Found GAD-7 column sets: {gad7_base_cols}")
-    print(f"Found SMHAT column sets: {smhat_base_cols}")
+    # Calculate scores only if ALL required questions are present
+    # GAD-7 Processing
+    gad7_cols = match_columns(gad7_questions)
+    if len(gad7_cols) == len(gad7_questions):
+        for col in gad7_cols:
+            df_with_scores[col] = pd.to_numeric(df_with_scores[col], errors='coerce')
+        
+        # Calculate GAD-7 total score
+        df_with_scores['GAD7_Total_Score'] = df_with_scores[gad7_cols].sum(axis=1)
+        
+        # Severity categorization
+        def categorize_gad7_severity(score):
+            if score < 5:
+                return 'Minimal Anxiety'
+            elif score < 10:
+                return 'Mild Anxiety'
+            elif score < 15:
+                return 'Moderate Anxiety'
+            else:
+                return 'Severe Anxiety'
+        
+        df_with_scores['GAD7_Severity'] = df_with_scores['GAD7_Total_Score'].apply(categorize_gad7_severity)
+    
+    # SMHAT Processing
+    smhat_cols = match_columns(smhat_questions)
+    if len(smhat_cols) == len(smhat_questions):
+        for col in smhat_cols:
+            df_with_scores[col] = pd.to_numeric(df_with_scores[col], errors='coerce')
+        
+        # Calculate SMHAT total score
+        df_with_scores['SMHAT_Total_Score'] = df_with_scores[smhat_cols].sum(axis=1)
     
     return df_with_scores
 def preprocess_data(df):
@@ -123,7 +115,7 @@ def preprocess_data(df):
     df["Completed"] = pd.to_datetime(df["Completed"].str.replace("EST", "").str.strip(), errors="coerce")
     
     text_columns = [
-        "9. Which of these topic areas would you like to explore with Koomba's Care Team? (Please select all that apply)",
+        "9. Which of these topic areas would you like to explore with Koomba’s Care Team? (Please select all that apply)",
     ]
     
     # Convert numeric values

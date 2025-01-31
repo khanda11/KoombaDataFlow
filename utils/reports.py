@@ -32,7 +32,7 @@ def get_analyzable_columns(df):
                        'First', 'Last', 'Email', 'Class Year', 'Completed', 'Visit_Number',
                        'GAD7_Severity']
     
-    topic_column = "9. Which of these topic areas would you like to explore with Koomba's Care Team? (Please select all that apply)"
+    topic_column = "9. Which of these topic areas would you like to explore with Koomba’s Care Team? (Please select all that apply)"
     
     score_columns = []
     if 'GAD7_Total_Score' in df.columns:
@@ -58,6 +58,7 @@ def create_assessment_visualization(df, assessment_type, view_type="By Date"):
     try:
         score_column = f"{assessment_type}_Total_Score"
         if score_column not in df.columns:
+            st.warning(f"No {assessment_type} assessment data found.")
             return None
             
         fig = make_subplots(specs=[[{"secondary_y": True}]])
@@ -263,6 +264,7 @@ def display_time_trend_analysis(df):
             
             if len(valid_data) < 2:
                 st.warning(f"Insufficient data points for {display_name} analysis. Need at least 2 valid measurements.")
+                st.info(f"What this means:\n- {display_name} requires multiple data points to show meaningful trends.\n- Ensure multiple measurements are collected across different visits or dates.\n- Check data collection consistency for this metric.")
                 continue
             
             # Single client or multiple clients logic
@@ -437,7 +439,7 @@ def display_summary_statistics(df):
     st.write(f"Analysis Period: {df['Completed'].min().strftime('%B %d, %Y')} to {df['Completed'].max().strftime('%B %d, %Y')}")
     
     # Add Topic Analysis Section
-    topic_column = "9. Which of these topic areas would you like to explore with Koomba's Care Team? (Please select all that apply)"
+    topic_column = "9. Which of these topic areas would you like to explore with Koomba’s Care Team? (Please select all that apply)"
     if topic_column in df.columns:
         st.header("Topic Exploration Analysis")
         
