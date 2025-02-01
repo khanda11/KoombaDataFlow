@@ -81,6 +81,7 @@ def create_assessment_visualization(df, assessment_type, view_type="By Date"):
             # Single client visualization
             valid_data = df_sorted[df_sorted[score_column].notna()]
             if len(valid_data) < 2:
+                st.warning(f"Insufficient data points for analysis. Need at least 2 valid measurements.")
                 return None
 
             start_val = float(valid_data.iloc[0][score_column])
@@ -264,7 +265,7 @@ def display_time_trend_analysis(df):
             
             if len(valid_data) < 2:
                 st.warning(f"Insufficient data points for {display_name} analysis. Need at least 2 valid measurements.")
-                st.info(f"What this means:\n- {display_name} requires multiple data points to show meaningful trends.\n- Ensure multiple measurements are collected across different visits or dates.\n- Check data collection consistency for this metric.")
+                
                 continue
             
             # Single client or multiple clients logic
@@ -552,7 +553,8 @@ def display_summary_statistics(df):
         st.warning("No numeric data found for analysis.")
 def plot_to_html(fig):
     """Convert Plotly figure to base64 encoded image for embedding in HTML."""
-    img_bytes = pio.to_image(fig, format='png', width=800, height=400)
+    # Increased size for report graphs
+    img_bytes = pio.to_image(fig, format='png', width=1200, height=600)  
     encoded_img = base64.b64encode(img_bytes).decode('utf-8')
     return f'<img src="data:image/png;base64,{encoded_img}" style="max-width:100%; height:auto;">'
 
@@ -656,21 +658,33 @@ def analyze_topic_exploration(df):
     return None
 
 def generate_time_trend_report(df, filters=None):
-    """Generate an HTML report for time trend analysis."""
+    """Generate an HTML report for time trend analysis with view type consideration."""
     filters = filters or {}
     report_content = []
     numeric_cols = get_analyzable_columns(df)
     
+    # Determine view type based on filters
+    view_type = "By Visit Number" if filters.get('visit_range') else "By Date"
+    
     for col in numeric_cols:
         is_single_client = len(df['Unique ID'].unique()) == 1
         
-        # Create trend visualization for multiple clients
+        # Create trend visualization
         trend_fig = go.Figure()
         
+        # Set x-axis based on view type
+        if view_type == "By Date":
+            x_axis = 'Completed'
+            x_title = 'Date'
+            df_sorted = df.sort_values('Completed')
+        else:
+            x_axis = 'Visit_Number'
+            x_title = 'Visit Number'
+            df_sorted = df.sort_values(['Unique ID', 'Visit_Number'])
+        
         if is_single_client:
-            client_data = df.sort_values('Completed')
-            numeric_data = pd.to_numeric(client_data[col], errors='coerce')
-            valid_data = client_data[numeric_data.notna()]
+            numeric_data = pd.to_numeric(df_sorted[col], errors='coerce')
+            valid_data = df_sorted[numeric_data.notna()]
             
             if len(valid_data) >= 2:
                 start_val = float(valid_data.iloc[0][col])
@@ -678,12 +692,12 @@ def generate_time_trend_report(df, filters=None):
                 change = end_val - start_val
                 change_pct = ((end_val - start_val) / start_val * 100) if start_val != 0 else 0
                 
-                # Single client trend visualization
                 trend_fig.add_trace(go.Scatter(
-                    x=valid_data['Completed'], 
+                    x=valid_data[x_axis],
                     y=numeric_data[numeric_data.notna()],
                     mode='lines+markers',
-                    name=col
+                    name=col,
+                    text=valid_data['Visit_Number'] if view_type == "By Date" else None
                 ))
                 
                 report_content.append({
@@ -694,11 +708,10 @@ def generate_time_trend_report(df, filters=None):
                     'Percent Change': f"{change_pct:.1f}%",
                     'Trend Plot': plot_to_html(trend_fig)
                 })
-        
         else:
             client_metrics = []
             for client_id in df['Unique ID'].unique():
-                client_data = df[df['Unique ID'] == client_id].sort_values('Completed')
+                client_data = df_sorted[df_sorted['Unique ID'] == client_id]
                 numeric_data = pd.to_numeric(client_data[col], errors='coerce')
                 valid_data = client_data[numeric_data.notna()]
                 
@@ -714,23 +727,29 @@ def generate_time_trend_report(df, filters=None):
                         'change_pct': change_pct
                     })
                 
-                # Add client-specific trace
                 trend_fig.add_trace(go.Scatter(
-                    x=valid_data['Completed'], 
+                    x=valid_data[x_axis],
                     y=numeric_data[numeric_data.notna()],
                     mode='lines+markers',
-                    name=f'Client {client_id}'
+                    name=f'Client {client_id}',
+                    line=dict(color='lightgray'),
+                    text=valid_data['Visit_Number'] if view_type == "By Date" else None
                 ))
             
             # Add average trend line
-            avg_by_date = df.groupby('Completed')[col].apply(
-                lambda x: pd.to_numeric(x, errors='coerce').mean()
-            ).dropna()
+            if view_type == "By Date":
+                avg_by_x = df_sorted.groupby('Completed')[col].apply(
+                    lambda x: pd.to_numeric(x, errors='coerce').mean()
+                ).dropna()
+            else:
+                avg_by_x = df_sorted.groupby('Visit_Number')[col].apply(
+                    lambda x: pd.to_numeric(x, errors='coerce').mean()
+                ).dropna()
             
-            if len(avg_by_date) >= 2:
+            if len(avg_by_x) >= 2:
                 trend_fig.add_trace(go.Scatter(
-                    x=avg_by_date.index,
-                    y=avg_by_date.values,
+                    x=avg_by_x.index,
+                    y=avg_by_x.values,
                     mode='lines+markers',
                     name='Average',
                     line=dict(color='blue', width=3)
@@ -750,26 +769,86 @@ def generate_time_trend_report(df, filters=None):
                     'Average Percent Change': f"{avg_change_pct:.1f}%",
                     'Trend Plot': plot_to_html(trend_fig)
                 })
+        
+        # Update layout based on view type
+        trend_fig.update_layout(
+            title=f'{col} Progress Over {x_title}',
+            xaxis_title=x_title,
+            yaxis_title='Score',
+            height=600,  # Increased height
+            width=1200,  # Increased width
+            showlegend=True,
+            legend=dict(
+                yanchor="top",
+                y=0.99,
+                xanchor="right",
+                x=0.99
+            )
+        )
+        
+        if view_type == "By Date":
+            trend_fig.update_layout(
+                xaxis=dict(
+                    type='date',
+                    tickformat='%b %d\n%Y'
+                )
+            )
+        else:
+            trend_fig.update_layout(
+                xaxis=dict(
+                    tickmode='linear',
+                    dtick=1
+                )
+            )
     
     # Convert report content to DataFrame for HTML display
     report_df = pd.DataFrame(report_content)
     
-    # Create full HTML report
+    # Create HTML report
     html_report = f"""
     <html>
     <head>
         <title>Time Trend Analysis Report</title>
         <style>
-            body {{ font-family: Arial, sans-serif; max-width: 1000px; margin: auto; }}
-            table {{ width: 100%; border-collapse: collapse; }}
-            th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
-            th {{ background-color: #f2f2f2; }}
-            img {{ max-width: 100%; height: auto; }}
+            body {{
+                font-family: Arial, sans-serif;
+                max-width: 1200px;
+                margin: auto;
+                padding: 20px;
+            }}
+            table {{
+                width: 100%;
+                border-collapse: collapse;
+                margin: 20px 0;
+            }}
+            th, td {{
+                border: 1px solid #ddd;
+                padding: 12px;
+                text-align: left;
+            }}
+            th {{
+                background-color: #f2f2f2;
+                font-weight: bold;
+            }}
+            img {{
+                max-width: 100%;
+                height: auto;
+                margin: 20px 0;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }}
+            .plot-container {{
+                margin: 30px 0;
+                padding: 20px;
+                background: white;
+                border-radius: 5px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }}
         </style>
     </head>
     <body>
         <h1>Time Trend Analysis Report</h1>
         {generate_report_header(df, 'Time Trend Analysis', filters)}
+        <p><strong>View Type:</strong> {view_type}</p>
         {report_df.to_html(index=False, escape=False)}
     </body>
     </html>
