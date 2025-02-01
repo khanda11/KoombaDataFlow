@@ -23,10 +23,10 @@ def calculate_metrics(df, unique_id_col, time_col):
     if time_col not in df.columns:
         raise KeyError(f"Required column '{time_col}' not found in DataFrame")
         
-    # Ensure datetime format for time column
+
     df[time_col] = pd.to_datetime(df[time_col])
     
-    # Get numeric columns, excluding the ID column
+    # excluding the ID colum
     numeric_columns = df.select_dtypes(include=['number']).columns
     numeric_columns = [col for col in numeric_columns if col != unique_id_col]
     

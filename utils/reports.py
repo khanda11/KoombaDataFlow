@@ -225,10 +225,10 @@ def display_time_trend_analysis(df):
     # Add view type selector
     view_type = st.radio("View Data By:", ["By Date", "By Visit Number (make sure to also select in sidebar if you want it to be sorted by visit in downloadable reports)"])
     
-    # Get numeric columns for analysis
+    
     numeric_cols = get_analyzable_columns(df)
     
-    # Check for and display assessment scores first
+   
     if 'GAD7_Total_Score' in df.columns:
         st.subheader("GAD-7 Assessment Analysis")
         gad7_fig = create_assessment_visualization(df, 'GAD7', view_type)  # Pass view_type here
@@ -244,7 +244,7 @@ def display_time_trend_analysis(df):
             st.plotly_chart(smhat_fig, use_container_width=True)
             
     
-    # Continue with analysis for other numeric columns
+    
     for col in numeric_cols:
         if not col.endswith('_Score') and not col.endswith('_Severity'):
             display_name = normalize_column_name(col)
@@ -439,7 +439,7 @@ def display_summary_statistics(df):
     
     st.write(f"Analysis Period: {df['Completed'].min().strftime('%B %d, %Y')} to {df['Completed'].max().strftime('%B %d, %Y')}")
     
-    # Add Topic Analysis Section
+
     topic_column = "9. Which of these topic areas would you like to explore with Koomba’s Care Team? (Please select all that apply)"
     if topic_column in df.columns:
         st.header("Topic Exploration Analysis")
@@ -553,7 +553,7 @@ def display_summary_statistics(df):
         st.warning("No numeric data found for analysis.")
 def plot_to_html(fig):
     """Convert Plotly figure to base64 encoded image for embedding in HTML."""
-    # Increased size for report graphs
+   
     img_bytes = pio.to_image(fig, format='png', width=1200, height=600)  
     encoded_img = base64.b64encode(img_bytes).decode('utf-8')
     return f'<img src="data:image/png;base64,{encoded_img}" style="max-width:100%; height:auto;">'
@@ -601,7 +601,7 @@ def analyze_topic_exploration(df):
         "9. Which of these topic areas would you like to explore with Koomba’s Care Team? (Please select all that apply)",
     ]
     
-    # Use a more flexible column matching approach
+
     matched_columns = [col for col in text_columns if col in df.columns]
     
     if not matched_columns:
@@ -610,7 +610,7 @@ def analyze_topic_exploration(df):
     
     col = matched_columns[0]
     
-    # Split topics carefully
+
     all_topics = []
     for topics in df[col].dropna():
         split_topics = [

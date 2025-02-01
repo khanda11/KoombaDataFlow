@@ -8,18 +8,18 @@ from utils.reports import (
     generate_downloadable_report
 )
 
-# Set page config
+
 st.set_page_config(
     page_title="Koomba Data Analysis",
     page_icon="📊",
     layout="wide"
 )
 
-# Set up the Streamlit app
+
 st.title("Koomba Data Analysis")
 st.write("Upload your CSV files to analyze client progress.")
 
-# Add analysis type selection
+
 analysis_type = st.radio(
     "Select Analysis Type",
     ["Time Trend Analysis", "Summary Statistics"],
