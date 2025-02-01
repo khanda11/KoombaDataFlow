@@ -223,7 +223,7 @@ def create_assessment_visualization(df, assessment_type, view_type="By Date"):
 def display_time_trend_analysis(df):
     """Display interactive time trend analysis including assessment scores."""
     # Add view type selector
-    view_type = st.radio("View Data By:", ["By Date", "By Visit Number (make sure to also select in sidebar if you want it to be sorted by date in downloadable reports)"])
+    view_type = st.radio("View Data By:", ["By Date", "By Visit Number (make sure to also select in sidebar if you want it to be sorted by visit in downloadable reports)"])
     
     # Get numeric columns for analysis
     numeric_cols = get_analyzable_columns(df)
