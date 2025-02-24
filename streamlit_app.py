@@ -27,7 +27,7 @@ analysis_type = st.radio(
 )
 
 # Define required columns for validation
-REQUIRED_COLUMNS = ["Unique ID", "Completed", "Client", "Client's Provider", "Team"]
+REQUIRED_COLUMNS = ["Unique ID"]
 
 # Initialize empty DataFrame for combined data
 combined_data = pd.DataFrame(columns=REQUIRED_COLUMNS)
