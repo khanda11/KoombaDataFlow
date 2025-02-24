@@ -7,6 +7,7 @@ from utils.reports import (
     display_summary_statistics,
     generate_downloadable_report
 )
+import io
 
 
 st.set_page_config(
@@ -45,14 +46,28 @@ if uploaded_files:
 
     for file in uploaded_files:
         try:
-            # Read CSV file
-            df = pd.read_csv(file, delimiter=";")
-            st.success(f"File {file.name} uploaded successfully.")
-
+            # Read the file content and create a copy to allow multiple parsing attempts
+            file_content = file.read()
+            
+            # First try with comma delimiter
+            try:
+                df = pd.read_csv(io.BytesIO(file_content), delimiter=",")
+                if "Unique ID" in df.columns:
+                    st.success(f"File {file.name} uploaded successfully (comma-delimited).")
+                else:
+                    # If the required column isn't found, try semicolon
+                    df = pd.read_csv(io.BytesIO(file_content), delimiter=";")
+                    st.success(f"File {file.name} uploaded successfully (semicolon-delimited).")
+            except:
+                # If comma fails, try semicolon
+                df = pd.read_csv(io.BytesIO(file_content), delimiter=";")
+                st.success(f"File {file.name} uploaded successfully (semicolon-delimited).")
+            
             # Validate required columns
             missing_cols = [col for col in REQUIRED_COLUMNS if col not in df.columns]
             if missing_cols:
                 st.error(f"File {file.name} is missing required columns: {missing_cols}")
+                st.write("Columns found in file:", df.columns.tolist())
                 continue
 
             # Preprocess data
